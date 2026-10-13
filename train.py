@@ -1,20 +1,3 @@
-"""
-Assignment 1 - training pipeline (the ONLY stage that trains anything).
-
-    uv run python main.py train
-
-Pipeline:  load + clean -> engineer features -> stratified 60/20/20 split ->
-fit preprocessing on train only -> train the SAME regularised logistic regression
-three ways (scikit-learn, manual PyTorch loop, torch.nn + torch.optim) ->
-evaluate on test against a naive baseline -> save everything app.py needs.
-
-All three methods minimise the same objective:
-
-    mean_i BCE(y_i, sigmoid(w.x_i + b))  +  (lam / 2) * ||w||^2        (bias not penalised)
-
-with lam = 1 / (C * n_train), which is exactly what scikit-learn's C means. That lets
-us pick C once and hand the same penalty to both PyTorch versions.
-"""
 
 import json
 
@@ -35,7 +18,7 @@ from common import (
     load_clean, sigmoid_np, split_columns, theoretical_threshold, total_cost,
 )
 
-# Tuning is deliberately tiny: only regularisation strength and the two learning rates.
+
 C_GRID = [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
 LR_GRID = [0.03, 0.1, 0.3, 0.6]
 EPOCHS = 10_000          # full-batch gradient descent
@@ -47,13 +30,10 @@ def main():
     np.random.seed(SEED)
     torch.manual_seed(SEED)
 
-    # ------------------------------------------------------------------ data + split
+    
     X_raw, y = load_clean()
     X_fe = engineer_features(X_raw)
 
-    # There is no date column, so a random split is the only option; stratify so the
-    # ~26% churn rate is the same in each part. Validation picks C and the learning
-    # rates; test is touched once, for the final numbers.
     X_tmp, X_test, y_tmp, y_test = train_test_split(
         X_fe, y, test_size=0.20, stratify=y, random_state=SEED)
     X_train, X_val, y_train, y_val = train_test_split(
@@ -61,7 +41,7 @@ def main():
     print(f"split  train={len(y_train)}  val={len(y_val)}  test={len(y_test)}  "
           f"churn rate train={y_train.mean():.3f} val={y_val.mean():.3f} test={y_test.mean():.3f}")
 
-    # ------------------------------------------------------------------ preprocessing (fit on train only)
+ 
     num_cols, cat_cols = split_columns(X_train)
     pre = ColumnTransformer([
         ("num", StandardScaler(), num_cols),
@@ -79,7 +59,7 @@ def main():
     yt = torch.tensor(y_train.to_numpy(), dtype=torch.float32)
     yv = torch.tensor(y_val.to_numpy(), dtype=torch.float32)
 
-    # ------------------------------------------------------------------ 1) scikit-learn
+   
     val_ll = {}
     for C in C_GRID:
         m = LogisticRegression(C=C, solver="lbfgs", max_iter=5000, tol=1e-10).fit(A_train, y_train)
@@ -97,7 +77,6 @@ def main():
     sk_w, sk_b = sk.coef_.ravel(), float(sk.intercept_[0])
     sk_obj = objective_np(sk_w, sk_b, A_train, y_train.to_numpy())
 
-    # ------------------------------------------------------------------ 2) manual PyTorch loop
     def train_manual(lr):
         """Raw tensors + autograd + a hand-written gradient step (Session 5 style)."""
         w = torch.zeros(d, requires_grad=True)
@@ -117,7 +96,6 @@ def main():
                 history.append(float(loss.detach()))
         return w.detach(), b.detach(), history
 
-    # ------------------------------------------------------------------ 3) standard PyTorch workflow
     def train_nn(lr):
         """nn.Module + loss object + optimizer. weight_decay=lam on the weights only equals the
         (lam/2)||w||^2 penalty, and the bias is left out, matching the other two methods."""
@@ -154,7 +132,6 @@ def main():
     w_man, b_man, hist_man, _ = manual_runs[lr_manual]
     model_nn, hist_nn, _ = nn_runs[lr_nn]
 
-    # ------------------------------------------------------------------ predictions on TEST
     At = torch.tensor(A_test, dtype=torch.float32)
     with torch.no_grad():
         p_man = torch.sigmoid(At @ w_man + b_man).numpy()
@@ -185,7 +162,7 @@ def main():
     do_nothing = total_cost(yt_np, np.zeros(n_test), 0.5)
     flag_all = total_cost(yt_np, np.ones(n_test), 0.5)
 
-    # ------------------------------------------------------------------ do the three methods agree?
+   
     agree = {
         "max |p_sklearn - p_manual|": float(np.abs(p_sk - p_man).max()),
         "max |p_sklearn - p_nn|": float(np.abs(p_sk - p_nn).max()),
@@ -208,7 +185,7 @@ def main():
     for k, v in agree.items():
         print(f"  {k:48s} {v:.6g}")
 
-    # ------------------------------------------------------------------ save artifacts
+    
     joblib.dump(pre, ART / "preprocessor.joblib")
     joblib.dump(sk, ART / "sklearn_logreg.joblib")
     torch.save({"w": w_man, "b": b_man}, ART / "manual_torch.pt")
